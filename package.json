@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "sarvam:ws-proxy": "node scripts/sarvam-ws-proxy.mjs",
     "seed:core": "node scripts/seed/01_core.mjs",
     "seed:icd10": "node scripts/seed/02_icd10.mjs",
     "seed:demo": "node scripts/seed/03_demo.mjs",
@@ -34,7 +35,9 @@
     "next-themes": "^0.4.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "recharts": "^3.8.1"
+    "recharts": "^3.8.1",
+    "sarvamai": "^1.1.6",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

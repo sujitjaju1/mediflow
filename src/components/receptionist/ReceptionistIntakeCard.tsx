@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown, Search, User } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -31,7 +32,7 @@ export function ReceptionistIntakeCard({ patients }: ReceptionistIntakeCardProps
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [patientId, setPatientId] = useState<string>("");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [chiefComplaint, setChiefComplaint] = useState("");
   const [visitType, setVisitType] = useState("General");
   const [priorOptions, setPriorOptions] = useState<PriorConsultationOption[]>([]);
@@ -39,23 +40,25 @@ export function ReceptionistIntakeCard({ patients }: ReceptionistIntakeCardProps
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const searchRootRef = useRef<HTMLDivElement | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return patients.slice(0, 12);
-    return patients.filter((patient) => patient.name.toLowerCase().includes(q)).slice(0, 12);
+    if (!q) return patients;
+    return patients.filter((patient) => patient.name.toLowerCase().includes(q));
   }, [patients, query]);
 
+  const selectedPatient = useMemo(() => patients.find((patient) => patient.id === patientId) ?? null, [patients, patientId]);
+
   useEffect(() => {
-    const onPointerDown = (event: MouseEvent) => {
-      if (!pickerRef.current) return;
-      if (!pickerRef.current.contains(event.target as Node)) {
-        setPickerOpen(false);
+    function handlePointerDown(event: PointerEvent) {
+      if (searchRootRef.current && !searchRootRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
       }
-    };
-    window.addEventListener("mousedown", onPointerDown);
-    return () => window.removeEventListener("mousedown", onPointerDown);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
 
   useEffect(() => {
@@ -90,6 +93,17 @@ export function ReceptionistIntakeCard({ patients }: ReceptionistIntakeCardProps
       }),
     ];
   }, [priorOptions]);
+
+  function toNumber(value: string) {
+    const n = Number(value);
+    return Number.isFinite(n) && value.trim() !== "" ? n : null;
+  }
+
+  function selectPatient(patient: PatientOption) {
+    setPatientId(patient.id);
+    setQuery(patient.name);
+    setIsDropdownOpen(false);
+  }
 
   async function saveIntake() {
     setError(null);
@@ -139,8 +153,6 @@ export function ReceptionistIntakeCard({ patients }: ReceptionistIntakeCardProps
 
       setSuccess("Intake saved. Doctor can continue this consultation.");
       setChiefComplaint("");
-      const selected = patients.find((patient) => patient.id === patientId);
-      setQuery(selected?.name ?? "");
       router.refresh();
     } catch {
       setError("Failed to save intake details.");
@@ -153,45 +165,59 @@ export function ReceptionistIntakeCard({ patients }: ReceptionistIntakeCardProps
     <Card>
       <CardHeader>
         <CardTitle>Reception Intake</CardTitle>
-        <CardDescription>Select patient and chief complaint before doctor starts.</CardDescription>
+        <CardDescription>Search one patient bar, then capture complaint and create the consultation.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="space-y-1.5" ref={pickerRef}>
+        <div ref={searchRootRef} className="relative">
           <Input
-            label="Patient"
+            label="Search patient"
             value={query}
-            onFocus={() => setPickerOpen(true)}
+            onFocus={() => setIsDropdownOpen(true)}
             onChange={(event) => {
-              setQuery(event.target.value);
+              const next = event.target.value;
+              setQuery(next);
               setPatientId("");
-              setPickerOpen(true);
+              setIsDropdownOpen(true);
             }}
-            placeholder="Search and select patient"
+            placeholder="Type patient name"
+            iconLeft={<Search className="h-4 w-4" />}
+            autoComplete="off"
           />
-          {pickerOpen ? (
-            <div className="max-h-56 overflow-auto rounded-[calc(var(--radius)-2px)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-card))] p-1">
+          <div className="pointer-events-none absolute right-3 top-10 -translate-y-1/2 text-[hsl(var(--text-muted))]">
+            <ChevronDown className={`h-4 w-4 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+          </div>
+          {isDropdownOpen ? (
+            <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-card))] p-1 shadow-[var(--shadow-md)]">
               {filtered.length ? (
                 filtered.map((patient) => (
                   <button
                     key={patient.id}
                     type="button"
-                    className="flex w-full items-center justify-between rounded-[calc(var(--radius)-4px)] px-2 py-2 text-left text-sm text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--bg-secondary))]"
-                    onClick={() => {
-                      setPatientId(patient.id);
-                      setQuery(patient.name);
-                      setPickerOpen(false);
-                    }}
+                    onClick={() => selectPatient(patient)}
+                    className="flex w-full items-center gap-3 rounded-[calc(var(--radius)-4px)] px-3 py-2 text-left text-sm text-[hsl(var(--text-primary))] transition-colors hover:bg-[hsl(var(--bg-secondary))]"
                   >
-                    <span>{patient.name}</span>
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--bg-secondary))] text-[hsl(var(--text-muted))]">
+                      <User className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{patient.name}</span>
+                      <span className="block text-xs text-[hsl(var(--text-muted))]">Tap to select</span>
+                    </span>
                   </button>
                 ))
               ) : (
-                <p className="px-2 py-2 text-xs text-[hsl(var(--text-muted))]">No patient matches search</p>
+                <div className="px-3 py-2 text-sm text-[hsl(var(--text-muted))]">No patient matches search.</div>
               )}
             </div>
           ) : null}
-          {patientId ? <p className="text-xs text-[hsl(var(--text-muted))]">Selected patient ready</p> : null}
         </div>
+
+        {selectedPatient ? (
+          <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--bg-secondary))] px-3 py-2 text-sm text-[hsl(var(--text-secondary))]">
+            Selected patient: <span className="font-medium text-[hsl(var(--text-primary))]">{selectedPatient.name}</span>
+          </div>
+        ) : null}
+
         <Select value={visitType} onValueChange={setVisitType} options={consultationTypeOptions} placeholder="Visit type" />
         {patientId && priorOptions.length ? (
           <div className="space-y-1.5">
