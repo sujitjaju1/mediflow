@@ -1,8 +1,8 @@
-# CliniQ - AI-Powered Clinical Documentation System
+# Mediflow - AI-Powered Clinical Documentation System
 
 ## 📋 Project Overview
 
-**CliniQ** is a modern healthcare management system designed specifically for Indian outpatient clinics and primary care centers. It combines **Speech-to-Text (STT)** transcription, **Artificial Intelligence (AI)-powered Medical Record extraction**, and **Clinical Decision Support** to streamline doctor-patient consultations and reduce documentation burden on healthcare providers.
+**Mediflow** is a modern healthcare management system designed specifically for Indian outpatient clinics and primary care centers. It combines **Speech-to-Text (STT)** transcription, **Artificial Intelligence (AI)-powered Medical Record extraction**, and **Clinical Decision Support** to streamline doctor-patient consultations and reduce documentation burden on healthcare providers.
 
 The system enables healthcare professionals to focus on patient care while AI automatically extracts clinical information from consultation transcripts, categorizes diagnoses using ICD-10 codes, and generates structured Electronic Medical Records (EMRs).
 
@@ -1096,7 +1096,7 @@ This project is part of a MVPM hackathon 2026 submission. All rights reserved.
 
 ## 👨‍💼 Project Information
 
-**Project Name:** Mediflow / CliniQ  
+**Project Name:** Mediflow  
 **Platform:** Healthcare Tech  
 **Objective:** Reduce doctor documentation burden through AI-powered EMR extraction and automate clinical coding  
 **Target Users:** Indian primary care centers, clinics, and outpatient departments  
