@@ -11,8 +11,14 @@ The system enables healthcare professionals to focus on patient care while AI au
 ## 🎥 Dashboard Demo Video
 
 <div align="center">
-  
-**[▶️ WATCH DASHBOARD OVERVIEW VIDEO](https://github.com/sujitjaju1/mediflow/releases/download/v1.0-dashboard-demo/Mediflow_Dashboard_ScreenRecording.mp4)** *(118 MB - Full system walkthrough)*
+
+### Full System Walkthrough
+<video width="100%" controls>
+  <source src="https://github.com/sujitjaju1/mediflow/releases/download/v1.0-dashboard-demo/Mediflow_Dashboard_ScreenRecording.mp4" type="video/mp4">
+  Your browser does not support the video tag. <a href="https://github.com/sujitjaju1/mediflow/releases/download/v1.0-dashboard-demo/Mediflow_Dashboard_ScreenRecording.mp4">Download video here</a>
+</video>
+
+**Showcases:** Doctor Dashboard • Patient Management • Real-time STT • EMR Extraction • ICD-10 Search • Receptionist Portal
 
 </div>
 
