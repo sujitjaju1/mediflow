@@ -1077,21 +1077,9 @@ created_at
 - **Development Notes:** See [CLAUDE.md](CLAUDE.md)
 
 ---
-
-## 🤝 Contributing
-
-This is a hackathon project. For contributions:
-1. Create a feature branch
-2. Make your changes
-3. Test thoroughly
-4. Submit a pull request
-
----
-
 ## 📄 License
 
-This project is part of a MVPM hackathon 2026 submission. All rights reserved.
-
+This project is part of MVPM hackathon 2026 submission. All rights reserved.
 ---
 
 ## 👨‍💼 Project Information
@@ -1115,4 +1103,4 @@ For issues or questions:
 ---
 
 **Last Updated:** April 11, 2026  
-**Version:** 0.1.0
+**Version:** 0.1.0  
