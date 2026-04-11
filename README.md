@@ -8,6 +8,16 @@ The system enables healthcare professionals to focus on patient care while AI au
 
 ---
 
+## 🎥 Dashboard Demo Video
+
+<div align="center">
+  
+**[▶️ WATCH DASHBOARD OVERVIEW VIDEO](https://github.com/sujitjaju1/mediflow/releases/download/v1.0-dashboard-demo/Mediflow_Dashboard_ScreenRecording.mp4)** *(118 MB - Full system walkthrough)*
+
+</div>
+
+---
+
 ## 📊 Current Project Status
 
 ### ✅ Fully Implemented Features
