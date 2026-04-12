@@ -39,22 +39,8 @@ type DeepgramResultMessage = {
   };
 };
 
-type SarvamWsMessage = {
-  type?: "data" | "error" | "events" | string;
-  data?: {
-    transcript?: string;
-    language_code?: string | null;
-    error?: string;
-    message?: string;
-    code?: string;
-  };
-};
-
 export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTArgs = {}) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const currentSpeakerRef = useRef<STTSpeaker>("doctor");
@@ -64,8 +50,27 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
   const [interimText, setInterimText] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [detectedLanguage, setDetectedLanguage] = useState<string | null>(null);
+  const hydratedRef = useRef(false);
 
   const fullText = useMemo(() => segments.filter((s) => s.is_final).map((s) => s.text).join(" ").trim(), [segments]);
+
+  const persistTranscript = useCallback(
+    async (processingStatus: "in_progress" | "paused" | "completed") => {
+      if (!consultationId) return;
+      await fetch("/api/transcripts/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: transcriptId ?? crypto.randomUUID(),
+          consultation_id: consultationId,
+          raw_text: fullText,
+          segments,
+          processing_status: processingStatus,
+        }),
+      });
+    },
+    [consultationId, fullText, segments, transcriptId]
+  );
 
   const cleanup = useCallback(() => {
     try {
@@ -73,98 +78,20 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
     } catch {
       // ignore
     }
-    try {
-      audioProcessorRef.current?.disconnect();
-      audioSourceRef.current?.disconnect();
-      void audioContextRef.current?.close();
-    } catch {
-      // ignore
-    }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     wsRef.current?.close();
     mediaRecorderRef.current = null;
-    audioContextRef.current = null;
-    audioSourceRef.current = null;
-    audioProcessorRef.current = null;
     streamRef.current = null;
     wsRef.current = null;
     setInterimText("");
   }, []);
 
-  const getSarvamConfig = useCallback(async () => {
+  const getDeepgramToken = useCallback(async () => {
     const res = await fetch("/api/stt/token", { method: "POST" });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? "Failed to get token");
-    return {
-      provider: String(data.provider ?? "sarvam"),
-    };
+    return { token: String(data.token ?? ""), mode: String(data.mode ?? "") };
   }, []);
-
-  const floatTo16BitPcm = useCallback((samples: Float32Array) => {
-    const output = new Int16Array(samples.length);
-    for (let i = 0; i < samples.length; i += 1) {
-      const clamped = Math.max(-1, Math.min(1, samples[i]));
-      output[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-    }
-    return output;
-  }, []);
-
-  const downsampleBuffer = useCallback((input: Float32Array, inputSampleRate: number, outputSampleRate: number) => {
-    if (outputSampleRate === inputSampleRate) return input;
-    if (outputSampleRate > inputSampleRate) return input;
-
-    const sampleRateRatio = inputSampleRate / outputSampleRate;
-    const newLength = Math.round(input.length / sampleRateRatio);
-    const result = new Float32Array(newLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-
-    while (offsetResult < result.length) {
-      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-      let accum = 0;
-      let count = 0;
-
-      for (let i = offsetBuffer; i < nextOffsetBuffer && i < input.length; i += 1) {
-        accum += input[i];
-        count += 1;
-      }
-
-      result[offsetResult] = count > 0 ? accum / count : 0;
-      offsetResult += 1;
-      offsetBuffer = nextOffsetBuffer;
-    }
-
-    return result;
-  }, []);
-
-  const startSarvamCapture = useCallback(
-    async (stream: MediaStream, ws: WebSocket) => {
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      await audioContext.resume();
-
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      const gain = audioContext.createGain();
-      gain.gain.value = 0;
-
-      audioSourceRef.current = source;
-      audioProcessorRef.current = processor;
-
-      processor.onaudioprocess = (event) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        const input = event.inputBuffer.getChannelData(0);
-        const downsampled = downsampleBuffer(input, audioContext.sampleRate, 16000);
-        const pcm16 = floatTo16BitPcm(downsampled);
-        ws.send(pcm16.buffer);
-      };
-
-      source.connect(processor);
-      processor.connect(gain);
-      gain.connect(audioContext.destination);
-    },
-    [downsampleBuffer, floatTo16BitPcm]
-  );
 
   const start = useCallback(async () => {
     if (!consultationId) {
@@ -187,48 +114,59 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
       streamRef.current = stream;
 
       setStatus("connecting");
-      await getSarvamConfig();
+      const auth = await getDeepgramToken();
 
-      const wsUrl = (() => {
-        const params = new URLSearchParams({
-          "language-code": "unknown",
-          model: "saaras:v3",
-          mode: "codemix",
-          sample_rate: "16000",
-          input_audio_codec: "wav",
-          vad_signals: "true",
-        });
-        return `ws://127.0.0.1:8787/speech-to-text/ws?${params.toString()}`;
-      })();
-
-      const ws = new WebSocket(wsUrl);
+      const params = new URLSearchParams({
+        model: "nova-3",
+        punctuate: "true",
+        smart_format: "true",
+        interim_results: "true",
+        // Hindi/Hinglish primary; Deepgram still performs reasonably on code-mix.
+        language: "hi",
+        endpointing: "300",
+      });
+      const wsUrl = `wss://api.deepgram.com/v1/listen?${params.toString()}`;
+      // Match the working project: subprotocol auth, no tokens in URL.
+      const ws = new WebSocket(wsUrl, ["token", auth.token]);
       wsRef.current = ws;
 
       ws.onopen = () => {
         setStatus("recording");
 
-        void startSarvamCapture(stream, ws);
+        const recorder = new MediaRecorder(stream, {
+          mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm",
+        });
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size && ws.readyState === WebSocket.OPEN) {
+            ws.send(event.data);
+          }
+        };
+        recorder.start(chunkMs);
       };
 
       ws.onmessage = (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as SarvamWsMessage;
-
-          if (parsed.type === "error") {
-            setError(parsed.data?.message ?? parsed.data?.error ?? "Sarvam STT error");
-            return;
-          }
-
-          if (parsed.type === "events") {
-            return;
-          }
-
-          if (parsed.type !== "data") return;
-
-          const text = String(parsed.data?.transcript ?? "").trim();
+          const data = JSON.parse(String(event.data)) as DeepgramResultMessage;
+          if (data?.type !== "Results") return;
+          const alt = data.channel?.alternatives?.[0];
+          const text = String(alt?.transcript ?? "").trim();
           if (!text) return;
 
-          if (parsed.data?.language_code) setDetectedLanguage(parsed.data.language_code);
+          if (data.metadata?.language) setDetectedLanguage(data.metadata.language);
+
+          const isFinal = Boolean(data.is_final);
+          if (!isFinal) {
+            setInterimText(text);
+            return;
+          }
+
+          const startMs = typeof data.start === "number" ? Math.round(data.start * 1000) : undefined;
+          const endMs =
+            typeof data.start === "number" && typeof data.duration === "number"
+              ? Math.round((data.start + data.duration) * 1000)
+              : undefined;
 
           setSegments((prev) => [
             ...prev,
@@ -236,10 +174,12 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
               id: crypto.randomUUID(),
               text,
               speaker: currentSpeakerRef.current,
-              confidence: 1,
+              confidence: typeof alt?.confidence === "number" ? alt.confidence : 0,
               timestamp: new Date().toISOString(),
               is_final: true,
-              language: parsed.data?.language_code ?? detectedLanguage,
+              start_ms: startMs,
+              end_ms: endMs,
+              language: detectedLanguage,
             },
           ]);
           setInterimText("");
@@ -250,15 +190,13 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
 
       ws.onerror = () => {
         // Browser doesn’t expose handshake status here.
-        setError("Sarvam STT websocket connection failed");
+        setError("STT connection error (websocket handshake failed)");
         setStatus("idle");
         cleanup();
       };
 
       ws.onclose = (e) => {
-        if (status !== "idle" && !e.reason) {
-          setError("Sarvam STT closed. Make sure the local proxy is running on port 8787.");
-        }
+        // Deepgram often provides a useful reason string here (e.g., auth failure)
         const code = typeof e?.code === "number" ? e.code : null;
         const reason = e?.reason ? String(e.reason) : "";
         if (reason) setError(`STT closed (${code ?? "?"}): ${reason}`);
@@ -271,12 +209,13 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
       setStatus("idle");
       cleanup();
     }
-  }, [cleanup, consultationId, detectedLanguage, getSarvamConfig, status, startSarvamCapture]);
+  }, [chunkMs, cleanup, consultationId, detectedLanguage, getDeepgramToken, status]);
 
-  const pause = useCallback(() => {
+  const pause = useCallback(async () => {
     mediaRecorderRef.current?.pause();
     setStatus("paused");
-  }, []);
+    await persistTranscript("paused");
+  }, [persistTranscript]);
 
   const resume = useCallback(() => {
     mediaRecorderRef.current?.resume();
@@ -284,51 +223,56 @@ export function useSTT({ consultationId, transcriptId, chunkMs = 250 }: UseSTTAr
   }, []);
 
   const stop = useCallback(async () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify({ type: "flush" }));
-        if (status === "recording") {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-      } catch {
-        // ignore flush issues and fall through to cleanup
-      }
-    }
     cleanup();
     setStatus("idle");
-    if (consultationId) {
-      await fetch("/api/transcripts/upsert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: transcriptId ?? crypto.randomUUID(),
-          consultation_id: consultationId,
-          raw_text: fullText,
-          segments,
-          processing_status: "completed",
-        }),
-      });
-    }
-  }, [cleanup, consultationId, fullText, segments, status, transcriptId]);
+    await persistTranscript("completed");
+  }, [cleanup, persistTranscript]);
 
   useEffect(() => {
-    if (!consultationId) return;
-    if (segments.length === 0 && !interimText) return;
-    const timer = setInterval(async () => {
-      await fetch("/api/transcripts/upsert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: transcriptId ?? crypto.randomUUID(),
-          consultation_id: consultationId,
-          raw_text: fullText,
-          segments,
-          processing_status: status === "recording" ? "in_progress" : "paused",
-        }),
-      });
-    }, 8000);
-    return () => clearInterval(timer);
-  }, [consultationId, fullText, interimText, segments, status, transcriptId]);
+    if (!consultationId || hydratedRef.current) return;
+    let cancelled = false;
+
+    const hydrate = async () => {
+      try {
+        const res = await fetch(`/api/transcripts/upsert?consultation_id=${encodeURIComponent(consultationId)}`);
+        const data = await res.json();
+        if (cancelled || !res.ok) return;
+
+        const savedSegments = Array.isArray(data?.transcript?.segments) ? data.transcript.segments : [];
+        const mapped: STTSegment[] = savedSegments
+          .map((segment: any): STTSegment | null => {
+            const text = String(segment?.text ?? "").trim();
+            const id = String(segment?.id ?? "").trim() || crypto.randomUUID();
+            if (!text) return null;
+            return {
+              id,
+              text,
+              speaker: segment?.speaker === "patient" ? "patient" : "doctor",
+              timestamp: String(segment?.timestamp ?? new Date().toISOString()),
+              confidence: typeof segment?.confidence === "number" ? segment.confidence : 0,
+              is_final: typeof segment?.is_final === "boolean" ? segment.is_final : true,
+              start_ms: typeof segment?.start_ms === "number" ? segment.start_ms : undefined,
+              end_ms: typeof segment?.end_ms === "number" ? segment.end_ms : undefined,
+              language: typeof segment?.language === "string" ? segment.language : null,
+            };
+          })
+          .filter(Boolean) as STTSegment[];
+
+        if (mapped.length) {
+          setSegments((prev) => (prev.length ? prev : mapped));
+        }
+      } catch {
+        // Non-blocking: transcript hydration should not interrupt live recording.
+      } finally {
+        hydratedRef.current = true;
+      }
+    };
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [consultationId]);
 
   useEffect(() => {
     return () => cleanup();

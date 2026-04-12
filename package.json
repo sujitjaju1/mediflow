@@ -1,20 +1,20 @@
 {
-  "name": "cliniq",
+  "name": "mediflow",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "sarvam:ws-proxy": "node scripts/sarvam-ws-proxy.mjs",
     "seed:core": "node scripts/seed/01_core.mjs",
     "seed:icd10": "node scripts/seed/02_icd10.mjs",
     "seed:demo": "node scripts/seed/03_demo.mjs",
+    "seed:medications": "node scripts/seed/08_medication_catalog.mjs",
     "seed:backfill:patients": "node scripts/seed/04_backfill_patient_doctor_id.mjs",
     "seed:backfill:patient_doctors": "node scripts/seed/05_backfill_patient_doctors.mjs",
     "seed:backfill:follow_up": "node scripts/seed/07_backfill_consultation_follow_up.mjs",
     "seed:demo:history": "node scripts/seed/06_history_demo.mjs",
-    "seed:all": "npm run seed:core && npm run seed:icd10 && npm run seed:demo"
+    "seed:all": "npm run seed:core && npm run seed:icd10 && npm run seed:medications && npm run seed:demo"
   },
   "dependencies": {
     "@deepgram/sdk": "^5.0.0",
@@ -35,9 +35,7 @@
     "next-themes": "^0.4.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "recharts": "^3.8.1",
-    "sarvamai": "^1.1.6",
-    "ws": "^8.18.3"
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

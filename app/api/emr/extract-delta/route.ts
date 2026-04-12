@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 
 import { getServerSession } from "@/src/lib/auth/session";
+import { logConsultationAudit } from "@/src/lib/audit/consultationLedger";
 import { EXTRACT_DELTA_SYSTEM_PROMPT } from "@/src/lib/emr/extractDeltaPrompt";
 import { enrichMedicationsWithIcd } from "@/src/lib/icd/enrichMedications";
 import { applyEMROps } from "@/src/lib/emr/merge";
@@ -14,6 +15,34 @@ function getGroq() {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("Missing GROQ_API_KEY");
   return new Groq({ apiKey });
+}
+
+function parseProviderError(error: unknown): {
+  status: number;
+  code: string;
+  message: string;
+  retryable: boolean;
+} {
+  if (error instanceof Error && error.message === "Missing GROQ_API_KEY") {
+    return { status: 500, code: "missing_api_key", message: "Missing GROQ_API_KEY", retryable: false };
+  }
+
+  const status = typeof (error as any)?.status === "number" ? Number((error as any).status) : 500;
+  const rawMessage = String((error as any)?.error?.message ?? (error as any)?.message ?? "Extraction failed").trim();
+  const msg = rawMessage || "Extraction failed";
+  const lower = msg.toLowerCase();
+
+  if (status === 401 || status === 403 || lower.includes("invalid api key") || lower.includes("authentication")) {
+    return { status: 502, code: "provider_auth", message: msg, retryable: false };
+  }
+  if (status === 429 || lower.includes("rate limit") || lower.includes("quota") || lower.includes("insufficient")) {
+    return { status: 429, code: "provider_rate_limited", message: msg, retryable: true };
+  }
+  if (status >= 500) {
+    return { status: 503, code: "provider_unavailable", message: msg, retryable: true };
+  }
+
+  return { status: 500, code: "extract_delta_failed", message: msg, retryable: false };
 }
 
 export async function POST(request: Request) {
@@ -100,9 +129,31 @@ export async function POST(request: Request) {
       { upsert: true }
     );
 
+    const consultation = await db.collection("consultations").findOne({ _id: consultationId }, { projection: { patient_id: 1 } });
+    await logConsultationAudit(db, {
+      consultationId,
+      patientId: consultation?.patient_id ?? null,
+      actorId: session.uid,
+      actorRole: String(session.role),
+      source: "ai_delta",
+      eventType: "ai_delta_edit",
+      before: body.emr_snapshot ?? null,
+      after: merged,
+      metadata: {
+        route: "emr.extract-delta.post",
+        operation_count: operations.length,
+        segment_count: segmentsDelta.length,
+        segment_ids: segmentsDelta.map((s) => s.id),
+      },
+    });
+
     return NextResponse.json({ operations, snapshot: merged, new_cursor: newCursor });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Extraction failed" }, { status: 500 });
+    const parsed = parseProviderError(error);
+    return NextResponse.json(
+      { error: parsed.message, error_code: parsed.code, retryable: parsed.retryable },
+      { status: parsed.status }
+    );
   }
 }
 
